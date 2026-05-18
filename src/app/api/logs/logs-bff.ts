@@ -10,6 +10,7 @@ import type {
   LogsHistogramResponse,
   LogRow,
   LogsResponse,
+  LogsViewResponse,
   OtlpLogsResponse,
 } from "@/models";
 import { LOG_FIELD_QUERY_PARAM, normalizeVisibleLogFieldIds } from "@/models";
@@ -59,7 +60,8 @@ export function createLogsResponse(
   searchParams: URLSearchParams,
 ): LogsResponse {
   const { filteredRows, total } = createFilteredRows(otlpLogs, searchParams);
-  const sortedRows = sortRowsByTimeDesc(filteredRows);
+  const rowsWithBucketMetadata = withHistogramBucketMetadata(filteredRows);
+  const sortedRows = sortRowsByTimeDesc(rowsWithBucketMetadata);
   const limit = getLimit(searchParams);
   const limitedRows =
     limit === undefined ? sortedRows : sortedRows.slice(0, limit);
@@ -70,6 +72,66 @@ export function createLogsResponse(
     total,
     filtered: sortedRows.length,
   };
+}
+
+function withHistogramBucketMetadata(rows: IndexedLogRow[]): IndexedLogRow[] {
+  const timedRows = rows
+    .map((row) => ({
+      row,
+      milliseconds: unixNanoToMilliseconds(row.timeUnixNano),
+    }))
+    .filter(
+      (
+        item,
+      ): item is {
+        row: IndexedLogRow;
+        milliseconds: number;
+      } =>
+        item.milliseconds !== undefined &&
+        Number.isFinite(item.milliseconds) &&
+        !Number.isNaN(new Date(item.milliseconds).getTime()),
+    );
+
+  if (timedRows.length === 0) {
+    return rows.map((row) => ({
+      ...row,
+      severityTone: getSeverityTone(row),
+    }));
+  }
+
+  let fromMs = timedRows[0]?.milliseconds ?? 0;
+  let toMs = fromMs;
+
+  for (const { milliseconds } of timedRows) {
+    fromMs = Math.min(fromMs, milliseconds);
+    toMs = Math.max(toMs, milliseconds);
+  }
+
+  const intervalMs = chooseBucketInterval(toMs - fromMs);
+
+  return rows.map((row) => {
+    const milliseconds = unixNanoToMilliseconds(row.timeUnixNano);
+    const severityTone = getSeverityTone(row);
+
+    if (
+      milliseconds === undefined ||
+      !Number.isFinite(milliseconds) ||
+      Number.isNaN(new Date(milliseconds).getTime())
+    ) {
+      return {
+        ...row,
+        severityTone,
+      };
+    }
+
+    return {
+      ...row,
+      histogramBucketStart: new Date(
+        floorToInterval(milliseconds, intervalMs),
+      ).toISOString(),
+      severityTone,
+    };
+  });
 }
 
 export function createLogsHistogramResponse(
@@ -136,6 +198,16 @@ export function createLogsHistogramResponse(
     from: new Date(fromMs).toISOString(),
     to: new Date(toMs).toISOString(),
     intervalMs,
+  };
+}
+
+export function createLogsViewResponse(
+  otlpLogs: OtlpLogsResponse,
+  searchParams: URLSearchParams,
+): LogsViewResponse {
+  return {
+    ...createLogsResponse(otlpLogs, searchParams),
+    histogram: createLogsHistogramResponse(otlpLogs, searchParams),
   };
 }
 
@@ -397,7 +469,12 @@ function getSelectedFieldIds(searchParams: URLSearchParams): LogFieldId[] {
 function stripIndexes(row: IndexedLogRow, fieldIds: readonly LogFieldId[]): LogRow {
   const projectedRow: LogRow = {
     id: row.id,
+    severityTone: row.severityTone,
   };
+
+  if (row.histogramBucketStart) {
+    projectedRow.histogramBucketStart = row.histogramBucketStart;
+  }
 
   for (const fieldId of fieldIds) {
     projectField(projectedRow, row, fieldId);

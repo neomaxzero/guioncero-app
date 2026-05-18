@@ -1,8 +1,7 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 
-import { useLogsHistogram } from "@/data/use-logs-histogram";
 import {
   severityToneChartColors,
   severityToneLabels,
@@ -16,6 +15,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import type { LogsHistogramBucket, LogsHistogramResponse } from "@/models";
 
 const chartConfig = {
   error: {
@@ -39,10 +39,29 @@ const chartConfig = {
 const barToneOrder = ["neutral", "info", "warning", "error"] as const;
 const skeletonBars = Array.from({ length: 28 }, (_, index) => index);
 
-export function LogsHistogram() {
-  const { data, error, isError, isFetching, isLoading, refetch } =
-    useLogsHistogram();
+type LogsHistogramProps = {
+  activeBucketStart: string | null;
+  data: LogsHistogramResponse | undefined;
+  error: Error | null;
+  isError: boolean;
+  isFetching: boolean;
+  isLoading: boolean;
+  onActiveBucketChange: (bucketStart: string | null) => void;
+  refetch: () => unknown;
+};
+
+export function LogsHistogram({
+  activeBucketStart,
+  data,
+  error,
+  isError,
+  isFetching,
+  isLoading,
+  onActiveBucketChange,
+  refetch,
+}: LogsHistogramProps) {
   const hasBuckets = (data?.buckets.length ?? 0) > 0;
+  const buckets = data?.buckets ?? [];
 
   return (
     <section className="px-3 pt-2 sm:px-4 sm:pt-3">
@@ -81,10 +100,11 @@ export function LogsHistogram() {
             <ChartContainer
               config={chartConfig}
               className="h-28 w-full aspect-auto"
+              onPointerLeave={() => onActiveBucketChange(null)}
             >
               <BarChart
                 accessibilityLayer
-                data={data?.buckets ?? []}
+                data={buckets}
                 margin={{
                   top: 2,
                   right: 4,
@@ -112,8 +132,18 @@ export function LogsHistogram() {
                     dataKey={tone}
                     stackId="logs"
                     fill={`var(--color-${tone})`}
+                    onMouseEnter={(bucket) =>
+                      onActiveBucketChange(getBucketStart(bucket))
+                    }
                     radius={tone === "error" ? [2, 2, 0, 0] : undefined}
-                  />
+                  >
+                    {buckets.map((bucket) => (
+                      <Cell
+                        key={`${tone}-${bucket.start}`}
+                        opacity={getBucketOpacity(bucket, activeBucketStart)}
+                      />
+                    ))}
+                  </Bar>
                 ))}
               </BarChart>
             </ChartContainer>
@@ -123,6 +153,21 @@ export function LogsHistogram() {
       </div>
     </section>
   );
+}
+
+function getBucketStart(bucket: { payload?: LogsHistogramBucket }): string | null {
+  return bucket.payload?.start ?? null;
+}
+
+function getBucketOpacity(
+  bucket: LogsHistogramBucket,
+  activeBucketStart: string | null,
+): number {
+  if (!activeBucketStart) {
+    return 1;
+  }
+
+  return bucket.start === activeBucketStart ? 1 : 0.28;
 }
 
 function LogsHistogramSkeleton() {

@@ -16,6 +16,7 @@ export type {
   LogsHistogramResponse,
   LogRow,
   LogsResponse,
+  LogsViewResponse,
   OtlpLogsResponse,
   ResourceLogs,
   ScopeLogs,

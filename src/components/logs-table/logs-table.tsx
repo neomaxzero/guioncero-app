@@ -20,10 +20,10 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { useLogs } from "@/data/use-logs";
 import {
   getSeverityPresentation,
   severityToneBadgeClassNames,
+  severityToneChartColors,
 } from "@/lib/log-severity";
 import { cn } from "@/lib/utils";
 import {
@@ -32,6 +32,7 @@ import {
   type LogFieldDefinition,
   type LogFieldId,
   type LogRow,
+  type LogsResponse,
 } from "@/models";
 import { useSettings } from "@/settings/use-settings";
 
@@ -39,7 +40,25 @@ const skeletonRows = Array.from({ length: 20 }, (_, index) => index);
 const LOG_ROW_HEIGHT = 34;
 const EMPTY_LOG_ROWS: LogRow[] = [];
 
-export function LogsTable() {
+type LogsTableProps = {
+  activeBucketStart: string | null;
+  data: LogsResponse | undefined;
+  error: Error | null;
+  isError: boolean;
+  isFetching: boolean;
+  isLoading: boolean;
+  refetch: () => unknown;
+};
+
+export function LogsTable({
+  activeBucketStart,
+  data,
+  error,
+  isError,
+  isFetching,
+  isLoading,
+  refetch,
+}: LogsTableProps) {
   const tableSorting = useSettings((state) => state.tableSorting);
   const setTableSorting = useSettings((state) => state.setTableSorting);
   const visibleLogFieldIds = useSettings((state) => state.visibleLogFieldIds);
@@ -71,7 +90,6 @@ export function LogsTable() {
       ),
     [visibleFieldDefinitions],
   );
-  const { data, error, isError, isFetching, isLoading, refetch } = useLogs();
   const tableRows = data?.rows ?? EMPTY_LOG_ROWS;
   const scrollParentRef = useRef<HTMLDivElement>(null);
   const handleSortingChange = useCallback(
@@ -187,12 +205,21 @@ export function LogsTable() {
                     return null;
                   }
 
+                  const rowHighlightStyle = getRowHighlightStyle(
+                    row.original,
+                    activeBucketStart,
+                  );
+
                   return (
                     <tr
                       key={row.original.id}
-                      className="group absolute grid w-full border-b text-foreground transition-colors hover:bg-muted/50"
+                      className={cn(
+                        "group absolute grid w-full border-b text-foreground transition-[background-color,box-shadow] hover:bg-muted/50",
+                        rowHighlightStyle && "z-[1]",
+                      )}
                       style={{
                         ...tableGridStyle,
+                        ...rowHighlightStyle,
                         height: `${virtualRow.size}px`,
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
@@ -217,6 +244,26 @@ export function LogsTable() {
       </div>
     </section>
   );
+}
+
+function getRowHighlightStyle(
+  row: LogRow,
+  activeBucketStart: string | null,
+): Pick<CSSProperties, "backgroundColor" | "boxShadow"> | undefined {
+  if (
+    !activeBucketStart ||
+    row.histogramBucketStart !== activeBucketStart ||
+    !row.severityTone
+  ) {
+    return undefined;
+  }
+
+  const color = severityToneChartColors[row.severityTone];
+
+  return {
+    backgroundColor: `color-mix(in oklch, ${color} 14%, transparent)`,
+    boxShadow: `inset 2px 0 0 ${color}`,
+  };
 }
 
 function createLogColumn(field: LogFieldDefinition): ColumnDef<LogRow> {

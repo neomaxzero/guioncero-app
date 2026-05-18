@@ -12,6 +12,8 @@ export type LogRecord = ILogRecord;
 
 export type LogRow = {
   id: string;
+  histogramBucketStart?: string;
+  severityTone?: "error" | "warning" | "info" | "neutral";
   time?: string;
   timeUnixNano?: LogRecord["timeUnixNano"];
   severity?: string;
@@ -49,4 +51,8 @@ export type LogsHistogramResponse = {
   from?: string;
   to?: string;
   intervalMs?: number;
+};
+
+export type LogsViewResponse = LogsResponse & {
+  histogram: LogsHistogramResponse;
 };

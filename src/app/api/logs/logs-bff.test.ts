@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { LogRecord, OtlpLogsResponse } from "@/models";
 
-import { createLogsHistogramResponse, createLogsResponse } from "./logs-bff";
+import {
+  createLogsHistogramResponse,
+  createLogsResponse,
+  createLogsViewResponse,
+} from "./logs-bff";
 
 function createSearchParams(query = "") {
   return new URLSearchParams(query);
@@ -258,6 +262,85 @@ describe("createLogsResponse", () => {
     });
     expect(response.rows[0]?.time).not.toBeUndefined();
     expect(response.rows[0]).not.toHaveProperty("message");
+  });
+
+  it("returns compact histogram correlation metadata when time and severity columns are hidden", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const response = createLogsResponse(
+      createLogsResponseFixture([
+        createLogRecord("info", {
+          timeUnixNano: unixMsToNanoString(startMs + 1_000),
+          severityText: "Information",
+        }),
+        createLogRecord("warning", {
+          timeUnixNano: unixMsToNanoString(startMs + 61_000),
+          severityText: "Warning",
+        }),
+      ]),
+      createSearchParams("field=message"),
+    );
+
+    expect(response.rows[0]).toMatchObject({
+      message: "warning",
+      histogramBucketStart: "2026-01-01T12:01:00.000Z",
+      severityTone: "warning",
+    });
+    expect(response.rows[1]).toMatchObject({
+      message: "info",
+      histogramBucketStart: "2026-01-01T12:00:00.000Z",
+      severityTone: "info",
+    });
+    expect(response.rows[0]).not.toHaveProperty("time");
+    expect(response.rows[0]).not.toHaveProperty("timeUnixNano");
+    expect(response.rows[0]).not.toHaveProperty("severity");
+    expect(response.rows[0]).not.toHaveProperty("severityText");
+    expect(response.rows[0]).not.toHaveProperty("severityNumber");
+  });
+
+  it("uses the same bucket starts for log rows and histogram buckets", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const logs = createLogsResponseFixture([
+      createLogRecord("first", {
+        timeUnixNano: unixMsToNanoString(startMs + 1_000),
+      }),
+      createLogRecord("second", {
+        timeUnixNano: unixMsToNanoString(startMs + 10_000),
+      }),
+    ]);
+
+    const tableResponse = createLogsResponse(
+      logs,
+      createSearchParams("field=message"),
+    );
+    const histogramResponse = createLogsHistogramResponse(
+      logs,
+      createSearchParams(),
+    );
+
+    expect(histogramResponse.buckets).toHaveLength(1);
+    expect(tableResponse.rows).toHaveLength(2);
+    expect(tableResponse.rows.map((row) => row.histogramBucketStart)).toEqual([
+      histogramResponse.buckets[0]?.start,
+      histogramResponse.buckets[0]?.start,
+    ]);
+  });
+
+  it("does not assign histogram bucket metadata to rows with invalid timestamps", () => {
+    const response = createLogsResponse(
+      createLogsResponseFixture([
+        createLogRecord("invalid", {
+          timeUnixNano: "not-a-number",
+          severityText: "Error",
+        }),
+      ]),
+      createSearchParams("field=message"),
+    );
+
+    expect(response.rows[0]).toMatchObject({
+      message: "invalid",
+      severityTone: "error",
+    });
+    expect(response.rows[0]).not.toHaveProperty("histogramBucketStart");
   });
 
   it("ignores unsupported field params and preserves valid selected fields", () => {
@@ -628,5 +711,45 @@ describe("createLogsHistogramResponse", () => {
     expect(response.buckets).toHaveLength(13);
     expect(response.buckets[0]?.start).toBe("2026-01-01T00:00:00.000Z");
     expect(response.buckets.at(-1)?.start).toBe("2026-01-04T00:00:00.000Z");
+  });
+});
+
+describe("createLogsViewResponse", () => {
+  it("builds rows and histogram from the same OTLP payload", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const logs = createLogsResponseFixture([
+      createLogRecord("error", {
+        timeUnixNano: unixMsToNanoString(startMs + 1_000),
+        severityText: "Error",
+      }),
+      createLogRecord("info", {
+        timeUnixNano: unixMsToNanoString(startMs + 2_000),
+        severityText: "Information",
+      }),
+    ]);
+
+    const response = createLogsViewResponse(
+      logs,
+      createSearchParams("field=message"),
+    );
+
+    expect(response).toMatchObject({
+      total: 2,
+      filtered: 2,
+      histogram: {
+        total: 2,
+        buckets: [
+          {
+            total: 2,
+            error: 1,
+            info: 1,
+          },
+        ],
+      },
+    });
+    expect(response.rows.map((row) => row.histogramBucketStart)).toEqual([
+      response.histogram.buckets[0]?.start,
+      response.histogram.buckets[0]?.start,
+    ]);
   });
 });
