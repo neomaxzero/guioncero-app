@@ -1,7 +1,12 @@
 export default function Home() {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-foreground">
-      <h1 className="text-3xl font-semibold tracking-normal">Guioncero</h1>
-    </main>
+    <div className="min-h-dvh bg-background text-foreground">
+      <header className="border-b">
+        <nav className="flex h-10 items-center px-4">
+          <span className="text-sm font-medium">Guioncero</span>
+        </nav>
+      </header>
+      <main className="min-h-[calc(100dvh-2.5rem)]" />
+    </div>
   );
 }
