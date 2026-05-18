@@ -7,6 +7,8 @@ export type LogFieldDefinition = {
 };
 
 export const LOG_FIELD_QUERY_PARAM = "field";
+export const GROUPED_LOG_FIELD_QUERY_PARAM = "groupedField";
+export const LOGS_VIEW_QUERY_PARAM = "view";
 
 export const LOG_FIELD_DEFINITIONS = [
   {
@@ -120,4 +122,80 @@ export function getLogFieldDefinition(
   fieldId: LogFieldId,
 ): (typeof LOG_FIELD_DEFINITIONS)[number] {
   return LOG_FIELD_DEFINITIONS.find((field) => field.id === fieldId)!;
+}
+
+export const GROUPED_LOG_FIELD_DEFINITIONS = [
+  {
+    id: "service",
+    label: "Service",
+    width: "minmax(16rem,1fr)",
+    minWidthRem: 16,
+    skeletonWidthClassName: "w-36",
+  },
+  {
+    id: "count",
+    label: "Count",
+    width: "7rem",
+    minWidthRem: 7,
+    skeletonWidthClassName: "w-14",
+  },
+  {
+    id: "error",
+    label: "Error",
+    width: "7rem",
+    minWidthRem: 7,
+    skeletonWidthClassName: "w-14",
+  },
+  {
+    id: "warning",
+    label: "Warn",
+    width: "7rem",
+    minWidthRem: 7,
+    skeletonWidthClassName: "w-14",
+  },
+  {
+    id: "info",
+    label: "Info",
+    width: "7rem",
+    minWidthRem: 7,
+    skeletonWidthClassName: "w-14",
+  },
+] as const;
+
+export type GroupedLogFieldId =
+  (typeof GROUPED_LOG_FIELD_DEFINITIONS)[number]["id"];
+
+export const DEFAULT_VISIBLE_GROUPED_LOG_FIELD_IDS = [
+  "service",
+  "count",
+  "error",
+  "warning",
+  "info",
+] as const satisfies readonly GroupedLogFieldId[];
+
+const groupedLogFieldIds = GROUPED_LOG_FIELD_DEFINITIONS.map(
+  (field) => field.id,
+);
+const groupedLogFieldIdSet = new Set<string>(groupedLogFieldIds);
+
+export function isGroupedLogFieldId(value: string): value is GroupedLogFieldId {
+  return groupedLogFieldIdSet.has(value);
+}
+
+export function normalizeVisibleGroupedLogFieldIds(
+  fieldIds: readonly string[] | undefined,
+  fallback: readonly GroupedLogFieldId[] = DEFAULT_VISIBLE_GROUPED_LOG_FIELD_IDS,
+): GroupedLogFieldId[] {
+  const selectedIds = new Set(fieldIds?.filter(isGroupedLogFieldId));
+  const normalizedIds = GROUPED_LOG_FIELD_DEFINITIONS.map((field) => field.id).filter(
+    (id) => selectedIds.has(id),
+  );
+
+  return normalizedIds.length > 0 ? normalizedIds : [...fallback];
+}
+
+export function getGroupedLogFieldDefinition(
+  fieldId: GroupedLogFieldId,
+): (typeof GROUPED_LOG_FIELD_DEFINITIONS)[number] {
+  return GROUPED_LOG_FIELD_DEFINITIONS.find((field) => field.id === fieldId)!;
 }

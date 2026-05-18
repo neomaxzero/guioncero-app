@@ -29,6 +29,8 @@ export type LogRow = {
   spanId?: string;
 };
 
+export type LogsViewMode = "logs" | "grouped";
+
 export type LogsResponse = {
   rows: LogRow[];
   total: number;
@@ -53,6 +55,51 @@ export type LogsHistogramResponse = {
   intervalMs?: number;
 };
 
-export type LogsViewResponse = LogsResponse & {
+export type DetailedLogsViewResponse = LogsResponse & {
+  view: "logs";
   histogram: LogsHistogramResponse;
 };
+
+export type GroupedLogServiceRow = {
+  id: string;
+  service: string;
+  color: string;
+  count: number;
+  error: number;
+  warning: number;
+  info: number;
+  neutral: number;
+  rows: LogRow[];
+};
+
+export type GroupedLogsHistogramService = {
+  id: string;
+  service: string;
+  color: string;
+};
+
+export type GroupedLogsHistogramBucket = {
+  start: string;
+  label: string;
+  total: number;
+  services: Record<string, number>;
+};
+
+export type GroupedLogsHistogramResponse = {
+  buckets: GroupedLogsHistogramBucket[];
+  services: GroupedLogsHistogramService[];
+  total: number;
+  from?: string;
+  to?: string;
+  intervalMs?: number;
+};
+
+export type GroupedLogsViewResponse = {
+  view: "grouped";
+  groups: GroupedLogServiceRow[];
+  histogram: GroupedLogsHistogramResponse;
+  total: number;
+  filtered: number;
+};
+
+export type LogsViewResponse = DetailedLogsViewResponse | GroupedLogsViewResponse;

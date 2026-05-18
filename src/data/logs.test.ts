@@ -13,18 +13,28 @@ describe("logs data helpers", () => {
       "logs",
       "severity,message",
     ]);
-    expect(logsViewQueryKey(["severity", "message"])).toEqual([
+    expect(logsViewQueryKey("logs", ["severity", "message"], ["service"])).toEqual([
       "logs-view",
+      "logs",
       "severity,message",
+      "",
     ]);
+    expect(
+      logsViewQueryKey("grouped", ["severity", "message"], ["service", "count"]),
+    ).toEqual(["logs-view", "grouped", "severity,message", "service,count"]);
   });
 
   it("creates field query params in registry order", () => {
     expect(createLogsUrl(["message", "severity"])).toBe(
       "/api/logs?field=severity&field=message",
     );
-    expect(createLogsViewUrl(["message", "severity"])).toBe(
+    expect(createLogsViewUrl("logs", ["message", "severity"], ["service"])).toBe(
       "/api/logs/view?field=severity&field=message",
+    );
+    expect(
+      createLogsViewUrl("grouped", ["message", "severity"], ["count", "service"]),
+    ).toBe(
+      "/api/logs/view?view=grouped&field=severity&field=message&groupedField=service&groupedField=count",
     );
   });
 });
