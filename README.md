@@ -2,6 +2,8 @@
 
 OTLP log viewer.
 
+Check live version at: https://guioncero-app.vercel.app/
+
 ## Tech Stack
 
 - Next.JS.
