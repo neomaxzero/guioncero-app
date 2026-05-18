@@ -4,6 +4,7 @@ import type {
 } from "@opentelemetry/otlp-transformer/build/src/common/internal-types";
 
 import type {
+  LogFieldId,
   LogRecord,
   LogsHistogramBucket,
   LogsHistogramResponse,
@@ -11,6 +12,7 @@ import type {
   LogsResponse,
   OtlpLogsResponse,
 } from "@/models";
+import { LOG_FIELD_QUERY_PARAM, normalizeVisibleLogFieldIds } from "@/models";
 import { getSeverityTone } from "../../../lib/log-severity";
 
 const UNKNOWN_TIME = "Unknown time";
@@ -37,6 +39,12 @@ type Filter = {
 };
 
 type IndexedLogRow = LogRow & {
+  time: string;
+  service: string;
+  message: string;
+  resourceAttributes: Record<string, string>;
+  scopeAttributes: Record<string, string>;
+  logAttributes: Record<string, string>;
   indexes: {
     resource: Record<string, string>;
     scopeAttributes: Record<string, string>;
@@ -55,9 +63,10 @@ export function createLogsResponse(
   const limit = getLimit(searchParams);
   const limitedRows =
     limit === undefined ? sortedRows : sortedRows.slice(0, limit);
+  const fieldIds = getSelectedFieldIds(searchParams);
 
   return {
-    rows: limitedRows.map(stripIndexes),
+    rows: limitedRows.map((row) => stripIndexes(row, fieldIds)),
     total,
     filtered: sortedRows.length,
   };
@@ -381,22 +390,116 @@ function formatBucketLabel(bucketStartMs: number, intervalMs: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function stripIndexes(row: IndexedLogRow): LogRow {
-  return {
+function getSelectedFieldIds(searchParams: URLSearchParams): LogFieldId[] {
+  return normalizeVisibleLogFieldIds(searchParams.getAll(LOG_FIELD_QUERY_PARAM));
+}
+
+function stripIndexes(row: IndexedLogRow, fieldIds: readonly LogFieldId[]): LogRow {
+  const projectedRow: LogRow = {
     id: row.id,
-    time: row.time,
-    timeUnixNano: row.timeUnixNano,
-    severity: row.severity,
-    severityText: row.severityText,
-    severityNumber: row.severityNumber,
-    service: row.service,
-    scopeName: row.scopeName,
-    message: row.message,
-    resourceAttributes: row.resourceAttributes,
-    scopeAttributes: row.scopeAttributes,
-    logAttributes: row.logAttributes,
-    traceId: row.traceId,
-    spanId: row.spanId,
+  };
+
+  for (const fieldId of fieldIds) {
+    projectField(projectedRow, row, fieldId);
+  }
+
+  return projectedRow;
+}
+
+function projectField(
+  projectedRow: LogRow,
+  row: IndexedLogRow,
+  fieldId: LogFieldId,
+): void {
+  if (fieldId === "severity") {
+    projectedRow.severity = row.severity;
+    projectedRow.severityText = row.severityText;
+    projectedRow.severityNumber = row.severityNumber;
+    return;
+  }
+
+  if (fieldId === "time") {
+    projectedRow.time = row.time;
+    projectedRow.timeUnixNano = row.timeUnixNano;
+    return;
+  }
+
+  if (fieldId === "service") {
+    projectedRow.service = row.service;
+    return;
+  }
+
+  if (fieldId === "message") {
+    projectedRow.message = row.message;
+    return;
+  }
+
+  if (fieldId === "traceId") {
+    projectedRow.traceId = row.traceId;
+    return;
+  }
+
+  if (fieldId === "spanId") {
+    projectedRow.spanId = row.spanId;
+    return;
+  }
+
+  if (fieldId === "scopeName") {
+    projectedRow.scopeName = row.scopeName;
+    return;
+  }
+
+  if (fieldId === "resource.service.namespace") {
+    projectAttribute(
+      projectedRow,
+      "resourceAttributes",
+      "service.namespace",
+      row.resourceAttributes["service.namespace"],
+    );
+    return;
+  }
+
+  if (fieldId === "resource.service.version") {
+    projectAttribute(
+      projectedRow,
+      "resourceAttributes",
+      "service.version",
+      row.resourceAttributes["service.version"],
+    );
+    return;
+  }
+
+  if (fieldId === "log.http.route") {
+    projectAttribute(
+      projectedRow,
+      "logAttributes",
+      "http.route",
+      row.logAttributes["http.route"],
+    );
+    return;
+  }
+
+  projectAttribute(
+    projectedRow,
+    "logAttributes",
+    "http.status_code",
+    row.logAttributes["http.status_code"],
+  );
+}
+
+function projectAttribute(
+  projectedRow: LogRow,
+  attributeGroup: "resourceAttributes" | "logAttributes",
+  attributeKey: string,
+  value: string | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  projectedRow[attributeGroup] = {
+    ...projectedRow[attributeGroup],
+    [attributeKey]: value,
   };
 }
 

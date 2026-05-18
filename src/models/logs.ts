@@ -12,17 +12,17 @@ export type LogRecord = ILogRecord;
 
 export type LogRow = {
   id: string;
-  time: string;
+  time?: string;
   timeUnixNano?: LogRecord["timeUnixNano"];
-  severity: string;
+  severity?: string;
   severityText?: string;
   severityNumber?: LogRecord["severityNumber"];
-  service: string;
+  service?: string;
   scopeName?: string;
-  message: string;
-  resourceAttributes: Record<string, string>;
-  scopeAttributes: Record<string, string>;
-  logAttributes: Record<string, string>;
+  message?: string;
+  resourceAttributes?: Record<string, string>;
+  scopeAttributes?: Record<string, string>;
+  logAttributes?: Record<string, string>;
   traceId?: string;
   spanId?: string;
 };

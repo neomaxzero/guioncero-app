@@ -142,20 +142,17 @@ describe("createLogsResponse", () => {
           ],
         }),
       ]),
-      createSearchParams(),
+      createSearchParams(
+        "field=time&field=service&field=message&field=scopeName&field=traceId&field=spanId&field=resource.service.namespace&field=log.http.status_code",
+      ),
     );
 
     expect(response.rows[0]).toMatchObject({
       service: "checkout-api",
       scopeName: "my.library",
-      severity: "Information",
       message: "ok",
       resourceAttributes: {
-        "service.name": "checkout-api",
         "service.namespace": "payments",
-      },
-      scopeAttributes: {
-        "scope.kind": "runtime",
       },
       logAttributes: {
         "http.status_code": "500",
@@ -163,7 +160,135 @@ describe("createLogsResponse", () => {
       traceId: "5B8EFFF798038103D269B633813FC60C",
       spanId: "EEE19B7EC3C1B174",
     });
+    expect(response.rows[0]).not.toHaveProperty("severity");
+    expect(response.rows[0]).not.toHaveProperty("severityText");
+    expect(response.rows[0]).not.toHaveProperty("severityNumber");
     expect(response.rows[0]?.time).not.toBe("Unknown time");
+  });
+
+  it("returns default visible fields plus required essentials when field params are omitted", () => {
+    const response = createLogsResponse(
+      createLogsResponseFixture([
+        createLogRecord("ok", {
+          traceId: "5B8EFFF798038103D269B633813FC60C",
+          spanId: "EEE19B7EC3C1B174",
+          attributes: [
+            {
+              key: "http.route",
+              value: {
+                stringValue: "/checkout",
+              },
+            },
+          ],
+        }),
+      ]),
+      createSearchParams(),
+    );
+
+    const row = response.rows[0];
+
+    expect(row).toMatchObject({
+      id: expect.any(String),
+      timeUnixNano: "1544712660300000000",
+      severity: "Information",
+      severityText: "Information",
+      service: "checkout-api",
+      message: "ok",
+    });
+    expect(row?.time).not.toBeUndefined();
+    expect(row).not.toHaveProperty("traceId");
+    expect(row).not.toHaveProperty("spanId");
+    expect(row).not.toHaveProperty("logAttributes");
+    expect(row).not.toHaveProperty("resourceAttributes");
+  });
+
+  it("projects only selected fields plus row id", () => {
+    const response = createLogsResponse(
+      createLogsResponseFixture([
+        createLogRecord("ok", {
+          severityNumber: 10,
+          traceId: "5B8EFFF798038103D269B633813FC60C",
+          attributes: [
+            {
+              key: "http.route",
+              value: {
+                stringValue: "/checkout",
+              },
+            },
+          ],
+        }),
+      ]),
+      createSearchParams("field=traceId&field=log.http.route"),
+    );
+
+    const row = response.rows[0];
+
+    expect(row).toMatchObject({
+      id: expect.any(String),
+      traceId: "5B8EFFF798038103D269B633813FC60C",
+      logAttributes: {
+        "http.route": "/checkout",
+      },
+    });
+    expect(row).not.toHaveProperty("time");
+    expect(row).not.toHaveProperty("timeUnixNano");
+    expect(row).not.toHaveProperty("severity");
+    expect(row).not.toHaveProperty("severityText");
+    expect(row).not.toHaveProperty("severityNumber");
+    expect(row).not.toHaveProperty("service");
+    expect(row).not.toHaveProperty("message");
+  });
+
+  it("returns backing data only for selected columns that need it", () => {
+    const response = createLogsResponse(
+      createLogsResponseFixture([
+        createLogRecord("ok", {
+          severityNumber: 10,
+        }),
+      ]),
+      createSearchParams("field=severity&field=time"),
+    );
+
+    expect(response.rows[0]).toMatchObject({
+      id: expect.any(String),
+      timeUnixNano: "1544712660300000000",
+      severity: "Information",
+      severityText: "Information",
+      severityNumber: 10,
+    });
+    expect(response.rows[0]?.time).not.toBeUndefined();
+    expect(response.rows[0]).not.toHaveProperty("message");
+  });
+
+  it("ignores unsupported field params and preserves valid selected fields", () => {
+    const response = createLogsResponse(
+      createLogsResponseFixture([
+        createLogRecord("ok", {
+          spanId: "EEE19B7EC3C1B174",
+        }),
+      ]),
+      createSearchParams("field=unknown&field=spanId"),
+    );
+
+    expect(response.rows[0]).toMatchObject({
+      spanId: "EEE19B7EC3C1B174",
+    });
+    expect(response.rows[0]).not.toHaveProperty("severity");
+    expect(response.rows[0]).not.toHaveProperty("message");
+  });
+
+  it("falls back to default fields when all field params are unsupported", () => {
+    const response = createLogsResponse(
+      createLogsResponseFixture([createLogRecord("ok")]),
+      createSearchParams("field=unknown"),
+    );
+
+    expect(response.rows[0]).toMatchObject({
+      severity: "Information",
+      service: "checkout-api",
+      message: "ok",
+    });
+    expect(response.rows[0]?.time).not.toBeUndefined();
   });
 
   it("filters by service, severity, and prefixed attributes with exact case-insensitive matches", () => {
@@ -386,9 +511,6 @@ describe("createLogsResponse", () => {
       severity: "Unspecified",
       service: "unknown service",
       message: "No message",
-      resourceAttributes: {},
-      scopeAttributes: {},
-      logAttributes: {},
     });
   });
 });

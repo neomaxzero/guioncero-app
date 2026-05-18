@@ -1,10 +1,21 @@
 import type { LogsHistogramResponse, LogsResponse } from "@/models";
+import {
+  LOG_FIELD_QUERY_PARAM,
+  type LogFieldId,
+  normalizeVisibleLogFieldIds,
+} from "@/models";
 
-export const logsQueryKey = ["logs"] as const;
+export function logsQueryKey(fieldIds: readonly LogFieldId[]) {
+  return ["logs", fieldIds.join(",")] as const;
+}
+
 export const logsHistogramQueryKey = ["logs-histogram"] as const;
 
-export async function fetchLogs(signal?: AbortSignal): Promise<LogsResponse> {
-  const response = await fetch("/api/logs", {
+export async function fetchLogs(
+  fieldIds: readonly LogFieldId[],
+  signal?: AbortSignal,
+): Promise<LogsResponse> {
+  const response = await fetch(createLogsUrl(fieldIds), {
     headers: {
       Accept: "application/json",
     },
@@ -16,6 +27,16 @@ export async function fetchLogs(signal?: AbortSignal): Promise<LogsResponse> {
   }
 
   return (await response.json()) as LogsResponse;
+}
+
+export function createLogsUrl(fieldIds: readonly LogFieldId[]): string {
+  const searchParams = new URLSearchParams();
+
+  for (const fieldId of normalizeVisibleLogFieldIds(fieldIds)) {
+    searchParams.append(LOG_FIELD_QUERY_PARAM, fieldId);
+  }
+
+  return `/api/logs?${searchParams.toString()}`;
 }
 
 export async function fetchLogsHistogram(

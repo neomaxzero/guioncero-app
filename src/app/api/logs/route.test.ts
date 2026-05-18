@@ -98,6 +98,32 @@ describe("GET /api/logs", () => {
     );
   });
 
+  it("uses field params only for BFF projection", async () => {
+    vi.stubEnv("OTLP_API_URL", "https://otlp.example.com/logs?existing=1");
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        resourceLogs: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await GET(
+      createRequest(
+        "http://localhost/api/logs?service=my.service&field=traceId&field=message",
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://otlp.example.com/logs?existing=1&service=my.service",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+        },
+      }),
+    );
+  });
+
   it("returns successful upstream JSON as flattened rows with counts", async () => {
     vi.stubEnv("OTLP_API_URL", "https://otlp.example.com/logs");
     const logs = createLogs([createLogRecord("first")]);
