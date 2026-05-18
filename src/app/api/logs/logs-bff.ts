@@ -41,14 +41,15 @@ export function createLogsResponse(
   const filteredRows = filters.length
     ? rows.filter((row) => matchesFilters(row, filters))
     : rows;
+  const sortedRows = sortRowsByTimeDesc(filteredRows);
   const limit = getLimit(searchParams);
   const limitedRows =
-    limit === undefined ? filteredRows : filteredRows.slice(0, limit);
+    limit === undefined ? sortedRows : sortedRows.slice(0, limit);
 
   return {
     rows: limitedRows.map(stripIndexes),
     total: rows.length,
-    filtered: filteredRows.length,
+    filtered: sortedRows.length,
   };
 }
 
@@ -214,6 +215,35 @@ function getLimit(searchParams: URLSearchParams): number | undefined {
   return limit;
 }
 
+function sortRowsByTimeDesc(rows: IndexedLogRow[]): IndexedLogRow[] {
+  return rows
+    .map((row, index) => ({
+      index,
+      row,
+      timeUnixNano: unixNanoToBigInt(row.timeUnixNano),
+    }))
+    .sort((left, right) => {
+      if (left.timeUnixNano === undefined && right.timeUnixNano === undefined) {
+        return left.index - right.index;
+      }
+
+      if (left.timeUnixNano === undefined) {
+        return 1;
+      }
+
+      if (right.timeUnixNano === undefined) {
+        return -1;
+      }
+
+      if (left.timeUnixNano === right.timeUnixNano) {
+        return left.index - right.index;
+      }
+
+      return left.timeUnixNano > right.timeUnixNano ? -1 : 1;
+    })
+    .map(({ row }) => row);
+}
+
 function stripIndexes(row: IndexedLogRow): LogRow {
   return {
     id: row.id,
@@ -308,6 +338,24 @@ function unixNanoToMilliseconds(
 
   if (typeof timeUnixNano === "number" && Number.isFinite(timeUnixNano)) {
     return Math.trunc(timeUnixNano / 1_000_000);
+  }
+
+  return undefined;
+}
+
+function unixNanoToBigInt(
+  timeUnixNano: LogRow["timeUnixNano"],
+): bigint | undefined {
+  if (typeof timeUnixNano === "string") {
+    try {
+      return BigInt(timeUnixNano);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (typeof timeUnixNano === "number" && Number.isFinite(timeUnixNano)) {
+    return BigInt(Math.trunc(timeUnixNano));
   }
 
   return undefined;

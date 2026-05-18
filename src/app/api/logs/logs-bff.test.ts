@@ -202,6 +202,61 @@ describe("createLogsResponse", () => {
     expect(response.rows.map((row) => row.message)).toEqual(["keep"]);
   });
 
+  it("sorts rows by newest time before applying limit", () => {
+    const logs = createLogsResponseFixture([
+      createLogRecord("oldest", {
+        timeUnixNano: "1544712660100000000",
+      }),
+      createLogRecord("newest", {
+        timeUnixNano: "1544712660300000000",
+      }),
+      createLogRecord("middle", {
+        timeUnixNano: "1544712660200000000",
+      }),
+    ]);
+
+    const response = createLogsResponse(logs, createSearchParams("limit=2"));
+
+    expect(response).toMatchObject({
+      total: 3,
+      filtered: 3,
+    });
+    expect(response.rows.map((row) => row.message)).toEqual([
+      "newest",
+      "middle",
+    ]);
+  });
+
+  it("keeps invalid and equal times in deterministic upstream order after valid times", () => {
+    const logs = createLogsResponseFixture([
+      createLogRecord("invalid-a", {
+        timeUnixNano: "not-a-number",
+      }),
+      createLogRecord("newest-a", {
+        timeUnixNano: "1544712660300000000",
+      }),
+      createLogRecord("newest-b", {
+        timeUnixNano: "1544712660300000000",
+      }),
+      createLogRecord("invalid-b", {
+        timeUnixNano: undefined,
+      }),
+      createLogRecord("older", {
+        timeUnixNano: "1544712660200000000",
+      }),
+    ]);
+
+    const response = createLogsResponse(logs, createSearchParams());
+
+    expect(response.rows.map((row) => row.message)).toEqual([
+      "newest-a",
+      "newest-b",
+      "older",
+      "invalid-a",
+      "invalid-b",
+    ]);
+  });
+
   it("ORs repeated same-key filters and ANDs different filters", () => {
     const logs = createLogsResponseFixture([
       createLogRecord("error", {
