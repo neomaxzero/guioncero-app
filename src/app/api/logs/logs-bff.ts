@@ -5,14 +5,28 @@ import type {
 
 import type {
   LogRecord,
+  LogsHistogramBucket,
+  LogsHistogramResponse,
   LogRow,
   LogsResponse,
   OtlpLogsResponse,
 } from "@/models";
+import { getSeverityTone } from "../../../lib/log-severity";
 
 const UNKNOWN_TIME = "Unknown time";
 const UNKNOWN_SERVICE = "unknown service";
 const NO_MESSAGE = "No message";
+const TARGET_MAX_BUCKETS = 40;
+const DEFAULT_BUCKET_INTERVAL_MS = 60_000;
+const BUCKET_INTERVALS_MS = [
+  DEFAULT_BUCKET_INTERVAL_MS,
+  5 * 60_000,
+  15 * 60_000,
+  60 * 60_000,
+  6 * 60 * 60_000,
+  24 * 60 * 60_000,
+  7 * 24 * 60 * 60_000,
+] as const;
 
 type FilterTarget = "resource" | "scopeAttributes" | "scopeName" | "log";
 
@@ -36,11 +50,7 @@ export function createLogsResponse(
   otlpLogs: OtlpLogsResponse,
   searchParams: URLSearchParams,
 ): LogsResponse {
-  const rows = flattenLogs(otlpLogs);
-  const filters = createFilters(searchParams);
-  const filteredRows = filters.length
-    ? rows.filter((row) => matchesFilters(row, filters))
-    : rows;
+  const { filteredRows, total } = createFilteredRows(otlpLogs, searchParams);
   const sortedRows = sortRowsByTimeDesc(filteredRows);
   const limit = getLimit(searchParams);
   const limitedRows =
@@ -48,8 +58,94 @@ export function createLogsResponse(
 
   return {
     rows: limitedRows.map(stripIndexes),
-    total: rows.length,
+    total,
     filtered: sortedRows.length,
+  };
+}
+
+export function createLogsHistogramResponse(
+  otlpLogs: OtlpLogsResponse,
+  searchParams: URLSearchParams,
+): LogsHistogramResponse {
+  const { filteredRows } = createFilteredRows(otlpLogs, searchParams);
+  const timedRows = filteredRows
+    .map((row) => ({
+      row,
+      milliseconds: unixNanoToMilliseconds(row.timeUnixNano),
+    }))
+    .filter(
+      (
+        item,
+      ): item is {
+        row: IndexedLogRow;
+        milliseconds: number;
+      } =>
+        item.milliseconds !== undefined &&
+        Number.isFinite(item.milliseconds) &&
+        !Number.isNaN(new Date(item.milliseconds).getTime()),
+    );
+
+  if (timedRows.length === 0) {
+    return {
+      buckets: [],
+      total: filteredRows.length,
+    };
+  }
+
+  let fromMs = timedRows[0]?.milliseconds ?? 0;
+  let toMs = fromMs;
+
+  for (const { milliseconds } of timedRows) {
+    fromMs = Math.min(fromMs, milliseconds);
+    toMs = Math.max(toMs, milliseconds);
+  }
+  const intervalMs = chooseBucketInterval(toMs - fromMs);
+  const bucketStartMs = floorToInterval(fromMs, intervalMs);
+  const bucketEndMs = floorToInterval(toMs, intervalMs);
+  const bucketCount = Math.floor((bucketEndMs - bucketStartMs) / intervalMs) + 1;
+  const buckets = Array.from({ length: bucketCount }, (_, index) =>
+    createHistogramBucket(bucketStartMs + index * intervalMs, intervalMs),
+  );
+
+  for (const { row, milliseconds } of timedRows) {
+    const bucketIndex = Math.floor((milliseconds - bucketStartMs) / intervalMs);
+    const bucket = buckets[bucketIndex];
+
+    if (!bucket) {
+      continue;
+    }
+
+    const tone = getSeverityTone(row);
+
+    bucket[tone] += 1;
+    bucket.total += 1;
+  }
+
+  return {
+    buckets,
+    total: filteredRows.length,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    intervalMs,
+  };
+}
+
+function createFilteredRows(
+  otlpLogs: OtlpLogsResponse,
+  searchParams: URLSearchParams,
+): {
+  filteredRows: IndexedLogRow[];
+  total: number;
+} {
+  const rows = flattenLogs(otlpLogs);
+  const filters = createFilters(searchParams);
+  const filteredRows = filters.length
+    ? rows.filter((row) => matchesFilters(row, filters))
+    : rows;
+
+  return {
+    filteredRows,
+    total: rows.length,
   };
 }
 
@@ -244,6 +340,47 @@ function sortRowsByTimeDesc(rows: IndexedLogRow[]): IndexedLogRow[] {
     .map(({ row }) => row);
 }
 
+function chooseBucketInterval(spanMs: number): number {
+  if (!Number.isFinite(spanMs) || spanMs <= 0) {
+    return DEFAULT_BUCKET_INTERVAL_MS;
+  }
+
+  return (
+    BUCKET_INTERVALS_MS.find(
+      (intervalMs) => Math.ceil(spanMs / intervalMs) + 1 <= TARGET_MAX_BUCKETS,
+    ) ?? BUCKET_INTERVALS_MS[BUCKET_INTERVALS_MS.length - 1]
+  );
+}
+
+function floorToInterval(milliseconds: number, intervalMs: number): number {
+  return Math.floor(milliseconds / intervalMs) * intervalMs;
+}
+
+function createHistogramBucket(
+  bucketStartMs: number,
+  intervalMs: number,
+): LogsHistogramBucket {
+  return {
+    start: new Date(bucketStartMs).toISOString(),
+    label: formatBucketLabel(bucketStartMs, intervalMs),
+    total: 0,
+    info: 0,
+    warning: 0,
+    error: 0,
+    neutral: 0,
+  };
+}
+
+function formatBucketLabel(bucketStartMs: number, intervalMs: number): string {
+  const date = new Date(bucketStartMs);
+
+  if (intervalMs < 24 * 60 * 60_000) {
+    return date.toISOString().slice(11, 16);
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
 function stripIndexes(row: IndexedLogRow): LogRow {
   return {
     id: row.id,
@@ -326,7 +463,7 @@ function formatUnixNanoTime(timeUnixNano: LogRecord["timeUnixNano"]): string {
 }
 
 function unixNanoToMilliseconds(
-  timeUnixNano: LogRecord["timeUnixNano"],
+  timeUnixNano: LogRow["timeUnixNano"],
 ): number | undefined {
   if (typeof timeUnixNano === "string") {
     try {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getSeverityPresentation } from "./severity";
+import { getSeverityPresentation } from "../../lib/log-severity";
 
 describe("getSeverityPresentation", () => {
   it("maps OTLP severity numbers to compact tones and labels", () => {

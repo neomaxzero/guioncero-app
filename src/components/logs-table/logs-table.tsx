@@ -10,10 +10,12 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useLogs } from "@/data/use-logs";
+import {
+  getSeverityPresentation,
+  severityToneBadgeClassNames,
+} from "@/lib/log-severity";
 import { cn } from "@/lib/utils";
 import type { LogRow } from "@/models";
-
-import { getSeverityPresentation, type SeverityTone } from "./severity";
 
 const columns: ColumnDef<LogRow>[] = [
   {
@@ -60,16 +62,6 @@ const LOG_ROW_HEIGHT = 34;
 const TABLE_GRID_COLUMNS =
   "grid-cols-[7rem_13rem_12rem_minmax(22rem,1fr)]";
 
-const severityToneClassNames: Record<SeverityTone, string> = {
-  error:
-    "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300",
-  warning:
-    "border-yellow-200 bg-yellow-50 text-yellow-700 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-300",
-  info: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300",
-  neutral:
-    "border-border bg-muted/60 text-muted-foreground dark:bg-muted/40",
-};
-
 export function LogsTable() {
   const { data, error, isError, isFetching, isLoading, refetch } = useLogs();
   const scrollParentRef = useRef<HTMLDivElement>(null);
@@ -90,7 +82,7 @@ export function LogsTable() {
   });
 
   return (
-    <section className="h-[calc(100dvh-2.5rem)] min-h-0 px-3 py-2 sm:px-4 sm:py-3">
+    <section className="min-h-0 flex-1 px-3 py-2 sm:px-4 sm:py-3">
       <div
         ref={scrollParentRef}
         className="h-full min-h-0 overflow-auto rounded-md border bg-background"
@@ -244,7 +236,7 @@ function SeverityBadge({ row }: { row: LogRow }) {
     <span
       className={cn(
         "inline-flex h-5 min-w-[3.8rem] items-center justify-center rounded-sm border px-1.5 font-mono text-[10px] font-semibold",
-        severityToneClassNames[severity.tone],
+        severityToneBadgeClassNames[severity.tone],
       )}
     >
       {severity.label}

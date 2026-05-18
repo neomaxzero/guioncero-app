@@ -32,3 +32,21 @@ export type LogsResponse = {
   total: number;
   filtered: number;
 };
+
+export type LogsHistogramBucket = {
+  start: string;
+  label: string;
+  total: number;
+  info: number;
+  warning: number;
+  error: number;
+  neutral: number;
+};
+
+export type LogsHistogramResponse = {
+  buckets: LogsHistogramBucket[];
+  total: number;
+  from?: string;
+  to?: string;
+  intervalMs?: number;
+};

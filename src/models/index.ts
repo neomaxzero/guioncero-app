@@ -1,5 +1,7 @@
 export type {
   LogRecord,
+  LogsHistogramBucket,
+  LogsHistogramResponse,
   LogRow,
   LogsResponse,
   OtlpLogsResponse,

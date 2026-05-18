@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LogRecord, OtlpLogsResponse } from "@/models";
 
-import { createLogsResponse } from "./logs-bff";
+import { createLogsHistogramResponse, createLogsResponse } from "./logs-bff";
 
 function createSearchParams(query = "") {
   return new URLSearchParams(query);
@@ -67,6 +67,10 @@ function createLogsResponseFixture(
       },
     ],
   };
+}
+
+function unixMsToNanoString(milliseconds: number): string {
+  return String(BigInt(milliseconds) * BigInt(1_000_000));
 }
 
 describe("createLogsResponse", () => {
@@ -386,5 +390,121 @@ describe("createLogsResponse", () => {
       scopeAttributes: {},
       logAttributes: {},
     });
+  });
+});
+
+describe("createLogsHistogramResponse", () => {
+  it("returns an empty histogram for empty logs", () => {
+    expect(createLogsHistogramResponse({}, createSearchParams())).toEqual({
+      buckets: [],
+      total: 0,
+    });
+  });
+
+  it("stacks severity tones into coherent time buckets", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const logs = createLogsResponseFixture([
+      createLogRecord("error", {
+        timeUnixNano: unixMsToNanoString(startMs + 1_000),
+        severityText: "Error",
+      }),
+      createLogRecord("warning", {
+        timeUnixNano: unixMsToNanoString(startMs + 2_000),
+        severityText: "Warning",
+      }),
+      createLogRecord("info", {
+        timeUnixNano: unixMsToNanoString(startMs + 3_000),
+        severityText: "Information",
+      }),
+      createLogRecord("debug", {
+        timeUnixNano: unixMsToNanoString(startMs + 4_000),
+        severityText: "Debug",
+      }),
+    ]);
+
+    const response = createLogsHistogramResponse(logs, createSearchParams());
+
+    expect(response).toMatchObject({
+      total: 4,
+      intervalMs: 60_000,
+      buckets: [
+        {
+          start: "2026-01-01T12:00:00.000Z",
+          total: 4,
+          error: 1,
+          warning: 1,
+          info: 1,
+          neutral: 1,
+        },
+      ],
+    });
+  });
+
+  it("applies filters while ignoring table limits", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const logs = createLogsResponseFixture([
+      createLogRecord("error-a", {
+        timeUnixNano: unixMsToNanoString(startMs),
+        severityText: "Error",
+      }),
+      createLogRecord("error-b", {
+        timeUnixNano: unixMsToNanoString(startMs + 20_000),
+        severityText: "Error",
+      }),
+      createLogRecord("info", {
+        timeUnixNano: unixMsToNanoString(startMs + 30_000),
+        severityText: "Information",
+      }),
+    ]);
+
+    const response = createLogsHistogramResponse(
+      logs,
+      createSearchParams("severity=error&limit=1"),
+    );
+
+    expect(response.total).toBe(2);
+    expect(response.buckets).toHaveLength(1);
+    expect(response.buckets[0]).toMatchObject({
+      total: 2,
+      error: 2,
+      info: 0,
+    });
+  });
+
+  it("excludes invalid timestamps from buckets but keeps them in the total", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const logs = createLogsResponseFixture([
+      createLogRecord("valid", {
+        timeUnixNano: unixMsToNanoString(startMs),
+      }),
+      createLogRecord("invalid", {
+        timeUnixNano: "not-a-number",
+      }),
+    ]);
+
+    const response = createLogsHistogramResponse(logs, createSearchParams());
+
+    expect(response.total).toBe(2);
+    expect(response.buckets).toHaveLength(1);
+    expect(response.buckets[0]?.total).toBe(1);
+  });
+
+  it("uses wider automatic intervals for longer timeframes", () => {
+    const startMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+    const logs = createLogsResponseFixture([
+      createLogRecord("first", {
+        timeUnixNano: unixMsToNanoString(startMs),
+      }),
+      createLogRecord("last", {
+        timeUnixNano: unixMsToNanoString(startMs + 3 * 24 * 60 * 60_000),
+      }),
+    ]);
+
+    const response = createLogsHistogramResponse(logs, createSearchParams());
+
+    expect(response.intervalMs).toBe(6 * 60 * 60_000);
+    expect(response.buckets).toHaveLength(13);
+    expect(response.buckets[0]?.start).toBe("2026-01-01T00:00:00.000Z");
+    expect(response.buckets.at(-1)?.start).toBe("2026-01-04T00:00:00.000Z");
   });
 });

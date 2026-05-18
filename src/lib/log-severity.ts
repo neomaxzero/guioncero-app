@@ -7,6 +7,37 @@ export type SeverityPresentation = {
   tone: SeverityTone;
 };
 
+export const severityToneOrder = [
+  "error",
+  "warning",
+  "info",
+  "neutral",
+] as const satisfies readonly SeverityTone[];
+
+export const severityToneLabels: Record<SeverityTone, string> = {
+  error: "Error",
+  warning: "Warning",
+  info: "Info",
+  neutral: "Other",
+};
+
+export const severityToneChartColors: Record<SeverityTone, string> = {
+  error: "oklch(0.577 0.245 27.325)",
+  warning: "oklch(0.795 0.184 86.047)",
+  info: "oklch(0.623 0.214 259.815)",
+  neutral: "var(--muted-foreground)",
+};
+
+export const severityToneBadgeClassNames: Record<SeverityTone, string> = {
+  error:
+    "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300",
+  warning:
+    "border-yellow-200 bg-yellow-50 text-yellow-700 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-300",
+  info: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300",
+  neutral:
+    "border-border bg-muted/60 text-muted-foreground dark:bg-muted/40",
+};
+
 const UNKNOWN_SEVERITY_LABEL = "UNKNOWN";
 
 export function getSeverityPresentation(
@@ -20,7 +51,7 @@ export function getSeverityPresentation(
   };
 }
 
-function getSeverityTone(
+export function getSeverityTone(
   row: Pick<LogRow, "severity" | "severityNumber" | "severityText">,
 ): SeverityTone {
   const toneFromNumber = getSeverityToneFromNumber(row.severityNumber);
@@ -37,10 +68,6 @@ function getSeverityToneFromNumber(
 ): SeverityTone | undefined {
   if (typeof severityNumber !== "number" || !Number.isFinite(severityNumber)) {
     return undefined;
-  }
-
-  if (severityNumber >= 21) {
-    return "error";
   }
 
   if (severityNumber >= 17) {
