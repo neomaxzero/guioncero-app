@@ -8,6 +8,7 @@
 ### 1. Data providers hooks
 
 - This will be connected to specific resources and these hooks will understand where/how to fetch information. it will be sort of the repository layer of the app, these hook would be universal (client/server compatible), although we will use most of them in the frontend. Its responsibility is to type the data from the endpoints and do almost no manipulation unless it's very useful to have data sanitised/filtered for the rest of the app.
+- Use react-query.
 
 ### 2. Components Hooks
 
@@ -24,6 +25,12 @@
 ### 5. Pages
 
 - They generally are a combination of Visual components and determine how does routes affect visual components.
+
+## Artifacts
+
+## Models
+
+`./models` They represent company entities that host contract for the rest of the app. The endpoints respect them and will be cornerstone to maintain safety types across the apps. Whenever possible, we should use these types.
 
 ## Nice to have
 
