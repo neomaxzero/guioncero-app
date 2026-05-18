@@ -19,6 +19,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import {
   getSeverityPresentation,
@@ -28,11 +29,17 @@ import {
 import { cn } from "@/lib/utils";
 import {
   LOG_FIELD_DEFINITIONS,
+  GROUPED_LOG_FIELD_DEFINITIONS,
+  getGroupedLogFieldDefinition,
   getLogFieldDefinition,
+  type GroupedLogFieldId,
+  type GroupedLogServiceRow,
+  type DetailedLogsViewResponse,
   type LogFieldDefinition,
   type LogFieldId,
   type LogRow,
-  type LogsResponse,
+  type LogsViewMode,
+  type LogsViewResponse,
 } from "@/models";
 import { useSettings } from "@/settings/use-settings";
 
@@ -42,7 +49,7 @@ const EMPTY_LOG_ROWS: LogRow[] = [];
 
 type LogsTableProps = {
   activeBucketStart: string | null;
-  data: LogsResponse | undefined;
+  data: LogsViewResponse | undefined;
   error: Error | null;
   isError: boolean;
   isFetching: boolean;
@@ -59,6 +66,55 @@ export function LogsTable({
   isLoading,
   refetch,
 }: LogsTableProps) {
+  const logsViewMode = useSettings((state) => state.logsViewMode);
+  const setLogsViewMode = useSettings((state) => state.setLogsViewMode);
+
+  if (logsViewMode === "grouped") {
+    return (
+      <GroupedLogsTable
+        data={data?.view === "grouped" ? data.groups : undefined}
+        error={error}
+        isError={isError}
+        isFetching={isFetching}
+        isLoading={isLoading}
+        logsViewMode={logsViewMode}
+        refetch={refetch}
+        setLogsViewMode={setLogsViewMode}
+      />
+    );
+  }
+
+  return (
+    <DetailedLogsTable
+      activeBucketStart={activeBucketStart}
+      data={data?.view === "grouped" ? undefined : data}
+      error={error}
+      isError={isError}
+      isFetching={isFetching}
+      isLoading={isLoading}
+      logsViewMode={logsViewMode}
+      refetch={refetch}
+      setLogsViewMode={setLogsViewMode}
+    />
+  );
+}
+
+function DetailedLogsTable({
+  activeBucketStart,
+  data,
+  error,
+  isError,
+  isFetching,
+  isLoading,
+  logsViewMode,
+  refetch,
+  setLogsViewMode,
+}: Omit<LogsTableProps, "data"> & {
+  data: DetailedLogsViewResponse | undefined;
+  logsViewMode: LogsViewMode;
+  setLogsViewMode: (mode: LogsViewMode) => void;
+}) {
+
   const tableSorting = useSettings((state) => state.tableSorting);
   const setTableSorting = useSettings((state) => state.setTableSorting);
   const visibleLogFieldIds = useSettings((state) => state.visibleLogFieldIds);
@@ -124,7 +180,11 @@ export function LogsTable({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
-      <div className="flex h-7 shrink-0 items-center justify-end">
+      <div className="flex h-7 shrink-0 items-center justify-end gap-2">
+        <LogsTableViewToggle
+          logsViewMode={logsViewMode}
+          onLogsViewModeChange={setLogsViewMode}
+        />
         <LogsTableSettings
           visibleLogFieldIds={visibleLogFieldIds}
           onToggleLogField={toggleLogField}
@@ -246,6 +306,238 @@ export function LogsTable({
   );
 }
 
+function GroupedLogsTable({
+  data,
+  error,
+  isError,
+  isFetching,
+  isLoading,
+  logsViewMode,
+  refetch,
+  setLogsViewMode,
+}: Omit<LogsTableProps, "activeBucketStart" | "data"> & {
+  data: GroupedLogServiceRow[] | undefined;
+  logsViewMode: LogsViewMode;
+  setLogsViewMode: (mode: LogsViewMode) => void;
+}) {
+  const groupedTableSorting = useSettings((state) => state.groupedTableSorting);
+  const setGroupedTableSorting = useSettings(
+    (state) => state.setGroupedTableSorting,
+  );
+  const visibleGroupedLogFieldIds = useSettings(
+    (state) => state.visibleGroupedLogFieldIds,
+  );
+  const toggleGroupedLogField = useSettings(
+    (state) => state.toggleGroupedLogField,
+  );
+  const visibleLogFieldIds = useSettings((state) => state.visibleLogFieldIds);
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const visibleGroupedFieldDefinitions = useMemo(
+    () => visibleGroupedLogFieldIds.map(getGroupedLogFieldDefinition),
+    [visibleGroupedLogFieldIds],
+  );
+  const childFieldDefinitions = useMemo(
+    () => visibleLogFieldIds.map(getLogFieldDefinition),
+    [visibleLogFieldIds],
+  );
+  const columns = useMemo(
+    () => visibleGroupedFieldDefinitions.map(createGroupedLogColumn),
+    [visibleGroupedFieldDefinitions],
+  );
+  const tableGridStyle = useMemo<CSSProperties>(
+    () => ({
+      gridTemplateColumns: visibleGroupedFieldDefinitions
+        .map((field) => field.width)
+        .join(" "),
+    }),
+    [visibleGroupedFieldDefinitions],
+  );
+  const childTableGridStyle = useMemo<CSSProperties>(
+    () => ({
+      gridTemplateColumns: childFieldDefinitions
+        .map((field) => field.width)
+        .join(" "),
+    }),
+    [childFieldDefinitions],
+  );
+  const tableMinWidth = useMemo(
+    () =>
+      Math.max(
+        30,
+        visibleGroupedFieldDefinitions.reduce(
+          (total, field) => total + field.minWidthRem,
+          0,
+        ),
+      ),
+    [visibleGroupedFieldDefinitions],
+  );
+  const childTableMinWidth = useMemo(
+    () =>
+      Math.max(
+        30,
+        childFieldDefinitions.reduce(
+          (total, field) => total + field.minWidthRem,
+          0,
+        ),
+      ),
+    [childFieldDefinitions],
+  );
+  const groups = data ?? [];
+  const handleSortingChange = useCallback(
+    (updater: SortingState | ((sorting: SortingState) => SortingState)) => {
+      setGroupedTableSorting(
+        functionalUpdate(updater, groupedTableSorting as SortingState),
+      );
+    },
+    [groupedTableSorting, setGroupedTableSorting],
+  );
+  const handleExpandedGroupToggle = useCallback((groupId: string) => {
+    setExpandedGroupIds((currentGroupIds) => {
+      const nextGroupIds = new Set(currentGroupIds);
+
+      if (nextGroupIds.has(groupId)) {
+        nextGroupIds.delete(groupId);
+      } else {
+        nextGroupIds.add(groupId);
+      }
+
+      return nextGroupIds;
+    });
+  }, []);
+  // TanStack Table exposes dynamic functions, so this opts out of compiler memoization.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data: groups,
+    columns,
+    enableMultiSort: false,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: handleSortingChange,
+    state: {
+      sorting: groupedTableSorting,
+    },
+  });
+  const rows = table.getRowModel().rows;
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3">
+      <div className="flex h-7 shrink-0 items-center justify-end gap-2">
+        <LogsTableViewToggle
+          logsViewMode={logsViewMode}
+          onLogsViewModeChange={setLogsViewMode}
+        />
+        <GroupedLogsTableSettings
+          visibleGroupedLogFieldIds={visibleGroupedLogFieldIds}
+          onToggleGroupedLogField={toggleGroupedLogField}
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-background">
+        <table
+          aria-busy={isFetching}
+          className="grid w-full caption-bottom text-[12px]"
+          style={{ minWidth: `${Math.max(tableMinWidth, childTableMinWidth)}rem` }}
+        >
+          <thead className="sticky top-0 z-10 grid bg-background shadow-[0_1px_0_0_var(--border)]">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id} className="grid h-8" style={tableGridStyle}>
+                {headerGroup.headers.map((header) => (
+                  <th
+                    key={header.id}
+                    className={getHeaderColumnClassName(header.column.id)}
+                  >
+                    {header.isPlaceholder ? null : (
+                      <button
+                        type="button"
+                        onClick={header.column.getToggleSortingHandler()}
+                        className="flex h-full min-w-0 flex-1 items-center gap-1 text-left"
+                      >
+                        <span className="min-w-0 truncate">
+                          {flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                        </span>
+                        <SortIndicator sortDirection={header.column.getIsSorted()} />
+                      </button>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody className="grid">
+            {isLoading ? (
+              <LogsTableSkeleton
+                fieldDefinitions={visibleGroupedFieldDefinitions}
+                gridStyle={tableGridStyle}
+              />
+            ) : null}
+            {isError && !isLoading ? (
+              <LogsTableFeedback
+                gridStyle={tableGridStyle}
+                message={error?.message ?? "Grouped logs could not be loaded."}
+                actionLabel={isFetching ? "Retrying..." : "Retry"}
+                actionDisabled={isFetching}
+                onAction={() => void refetch()}
+              />
+            ) : null}
+            {!isLoading && !isError && rows.length === 0 ? (
+              <LogsTableFeedback
+                gridStyle={tableGridStyle}
+                message="No services found"
+              />
+            ) : null}
+            {!isLoading && !isError
+              ? rows.map((row) => {
+                  const group = row.original;
+                  const isExpanded = expandedGroupIds.has(group.id);
+
+                  return (
+                    <tr key={group.id} className="contents">
+                      <td className="contents" style={{ gridColumn: "1 / -1" }}>
+                        <div
+                          className="group grid min-h-9 border-b text-foreground transition-colors hover:bg-muted/45"
+                          style={tableGridStyle}
+                        >
+                          {row.getVisibleCells().map((cell) => (
+                            <div
+                              key={cell.id}
+                              className={getBodyColumnClassName(cell.column.id)}
+                            >
+                              {cell.column.id === "service"
+                                ? renderGroupedServiceCell(
+                                    group,
+                                    isExpanded,
+                                    handleExpandedGroupToggle,
+                                  )
+                                : flexRender(
+                                    cell.column.columnDef.cell,
+                                    cell.getContext(),
+                                  )}
+                            </div>
+                          ))}
+                        </div>
+                        {isExpanded ? (
+                          <GroupedLogsChildRows
+                            fieldDefinitions={childFieldDefinitions}
+                            gridStyle={childTableGridStyle}
+                            rows={group.rows}
+                          />
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
+              : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function getRowHighlightStyle(
   row: LogRow,
   activeBucketStart: string | null,
@@ -301,6 +593,266 @@ function SortIndicator({
     >
       {sortDirection === "asc" ? "^" : sortDirection === "desc" ? "v" : ""}
     </span>
+  );
+}
+
+function LogsTableViewToggle({
+  logsViewMode,
+  onLogsViewModeChange,
+}: {
+  logsViewMode: LogsViewMode;
+  onLogsViewModeChange: (mode: LogsViewMode) => void;
+}) {
+  return (
+    <div
+      className="inline-flex h-7 rounded-md border bg-muted p-0.5"
+      aria-label="Log view mode"
+    >
+      {(["logs", "grouped"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          aria-pressed={logsViewMode === mode}
+          onClick={() => onLogsViewModeChange(mode)}
+          className={cn(
+            "rounded-sm px-2 text-xs font-medium capitalize text-muted-foreground transition-colors hover:text-foreground active:scale-[0.98]",
+            logsViewMode === mode &&
+              "bg-background text-foreground shadow-sm hover:text-foreground",
+          )}
+        >
+          {mode}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function createGroupedLogColumn(
+  field: LogFieldDefinition,
+): ColumnDef<GroupedLogServiceRow> {
+  return {
+    id: field.id,
+    header: field.label,
+    accessorFn: (row) =>
+      getGroupedLogFieldValue(row, field.id as GroupedLogFieldId),
+    cell: ({ getValue }) =>
+      renderGroupedLogCell(
+        field.id as GroupedLogFieldId,
+        getValue<string | number>(),
+      ),
+    sortDescFirst: field.id !== "service",
+    sortingFn: groupedLogFieldSortingFn,
+  };
+}
+
+const groupedLogFieldSortingFn: SortingFn<GroupedLogServiceRow> = (
+  leftRow,
+  rightRow,
+  columnId,
+) =>
+  compareSortableValues(
+    getGroupedLogFieldValue(leftRow.original, columnId as GroupedLogFieldId),
+    getGroupedLogFieldValue(rightRow.original, columnId as GroupedLogFieldId),
+  );
+
+function getGroupedLogFieldValue(
+  row: GroupedLogServiceRow,
+  fieldId: GroupedLogFieldId,
+): number | string {
+  if (fieldId === "service") {
+    return row.service.toLocaleLowerCase();
+  }
+
+  return row[fieldId];
+}
+
+function renderGroupedLogCell(
+  fieldId: GroupedLogFieldId,
+  value: number | string,
+) {
+  if (fieldId === "service") {
+    return null;
+  }
+
+  return (
+    <span
+      className={cn(
+        "font-mono text-[12px] tabular-nums",
+        fieldId === "error" && "text-red-700 dark:text-red-300",
+        fieldId === "warning" && "text-yellow-700 dark:text-yellow-300",
+        fieldId === "info" && "text-blue-700 dark:text-blue-300",
+      )}
+    >
+      {Number(value).toLocaleString()}
+    </span>
+  );
+}
+
+function renderGroupedServiceCell(
+  group: GroupedLogServiceRow,
+  isExpanded: boolean,
+  onExpandedGroupToggle: (groupId: string) => void,
+) {
+  return (
+    <button
+      type="button"
+      aria-expanded={isExpanded}
+      onClick={() => onExpandedGroupToggle(group.id)}
+      className="flex h-full min-w-0 flex-1 items-center gap-2 text-left"
+    >
+      {isExpanded ? (
+        <ChevronDown
+          aria-hidden="true"
+          className="size-3 shrink-0 text-muted-foreground"
+          strokeWidth={1.75}
+        />
+      ) : (
+        <ChevronRight
+          aria-hidden="true"
+          className="size-3 shrink-0 text-muted-foreground"
+          strokeWidth={1.75}
+        />
+      )}
+      <span
+        aria-hidden="true"
+        className="size-2.5 shrink-0 rounded-[3px]"
+        style={{ backgroundColor: group.color }}
+      />
+      <span className="min-w-0 truncate font-medium" title={group.service}>
+        {group.service}
+      </span>
+      <span className="ml-auto font-mono text-[11px] text-muted-foreground tabular-nums">
+        {group.rows.length.toLocaleString()}
+      </span>
+    </button>
+  );
+}
+
+function GroupedLogsChildRows({
+  fieldDefinitions,
+  gridStyle,
+  rows,
+}: {
+  fieldDefinitions: readonly LogFieldDefinition[];
+  gridStyle: CSSProperties;
+  rows: readonly LogRow[];
+}) {
+  return (
+    <div className="grid border-l-2 bg-muted/20">
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className="grid min-h-8 border-b bg-background/40 text-foreground"
+          style={gridStyle}
+        >
+          {fieldDefinitions.map((field) => (
+            <div key={`${row.id}-${field.id}`} className={getBodyColumnClassName(field.id)}>
+              {renderLogCell(
+                field.id as LogFieldId,
+                row,
+                getLogFieldValue(row, field.id as LogFieldId),
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GroupedLogsTableSettings({
+  onToggleGroupedLogField,
+  visibleGroupedLogFieldIds,
+}: {
+  onToggleGroupedLogField: (fieldId: GroupedLogFieldId) => void;
+  visibleGroupedLogFieldIds: readonly GroupedLogFieldId[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const visibleFieldIdSet = useMemo(
+    () => new Set(visibleGroupedLogFieldIds),
+    [visibleGroupedLogFieldIds],
+  );
+  const visibleCount = visibleGroupedLogFieldIds.length;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !settingsRef.current?.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={settingsRef} className="relative">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        onClick={() => setIsOpen((current) => !current)}
+        className="inline-flex h-7 items-center gap-2 rounded-md border bg-background px-2.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-muted active:scale-[0.98]"
+      >
+        <span>Columns</span>
+        <span className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          {visibleCount}
+        </span>
+      </button>
+      {isOpen ? (
+        <div
+          role="menu"
+          aria-label="Grouped table columns"
+          className="absolute right-0 top-8 z-20 w-56 rounded-md border bg-popover p-1.5 text-popover-foreground shadow-lg"
+        >
+          <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">
+            {visibleCount} visible
+          </div>
+          {GROUPED_LOG_FIELD_DEFINITIONS.map((field) => {
+            const isVisible = visibleFieldIdSet.has(field.id);
+            const isLastVisibleField = isVisible && visibleCount === 1;
+
+            return (
+              <label
+                key={field.id}
+                className={cn(
+                  "flex h-8 cursor-pointer items-center gap-2 rounded-sm px-2 text-xs transition-colors hover:bg-muted",
+                  isLastVisibleField && "cursor-default opacity-70",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={isVisible}
+                  disabled={isLastVisibleField}
+                  onChange={() => onToggleGroupedLogField(field.id)}
+                  className="size-3.5 accent-foreground"
+                />
+                <span className="min-w-0 truncate">{field.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -663,6 +1215,10 @@ function getBodyColumnClassName(columnId: string): string {
 }
 
 function getColumnAlignmentClassName(columnId: string): string {
+  if (["count", "error", "warning", "info"].includes(columnId)) {
+    return "justify-end text-right";
+  }
+
   if (columnId === "severity") {
     return "justify-start";
   }

@@ -4,16 +4,25 @@ import type {
 } from "@opentelemetry/otlp-transformer/build/src/common/internal-types";
 
 import type {
+  GroupedLogsHistogramBucket,
+  GroupedLogServiceRow,
+  GroupedLogsViewResponse,
   LogFieldId,
   LogRecord,
   LogsHistogramBucket,
   LogsHistogramResponse,
+  LogsViewMode,
   LogRow,
   LogsResponse,
   LogsViewResponse,
   OtlpLogsResponse,
 } from "@/models";
-import { LOG_FIELD_QUERY_PARAM, normalizeVisibleLogFieldIds } from "@/models";
+import {
+  LOG_FIELD_QUERY_PARAM,
+  LOGS_VIEW_QUERY_PARAM,
+  normalizeVisibleLogFieldIds,
+} from "@/models";
+import { getServiceColor } from "@/lib/service-color";
 import { getSeverityTone } from "../../../lib/log-severity";
 
 const UNKNOWN_TIME = "Unknown time";
@@ -205,10 +214,169 @@ export function createLogsViewResponse(
   otlpLogs: OtlpLogsResponse,
   searchParams: URLSearchParams,
 ): LogsViewResponse {
+  if (getLogsViewMode(searchParams) === "grouped") {
+    return createGroupedLogsViewResponse(otlpLogs, searchParams);
+  }
+
   return {
+    view: "logs",
     ...createLogsResponse(otlpLogs, searchParams),
     histogram: createLogsHistogramResponse(otlpLogs, searchParams),
   };
+}
+
+export function createGroupedLogsViewResponse(
+  otlpLogs: OtlpLogsResponse,
+  searchParams: URLSearchParams,
+): GroupedLogsViewResponse {
+  const { filteredRows, total } = createFilteredRows(otlpLogs, searchParams);
+  const rowsWithBucketMetadata = withHistogramBucketMetadata(filteredRows);
+  const sortedRows = sortRowsByTimeDesc(rowsWithBucketMetadata);
+  const fieldIds = getSelectedFieldIds(searchParams);
+  const groupsByService = new Map<string, GroupedLogServiceRow>();
+
+  for (const row of sortedRows) {
+    const service = row.service;
+    const groupId = createServiceGroupId(service);
+    const group = groupsByService.get(groupId) ?? {
+      id: groupId,
+      service,
+      color: getServiceColor(service),
+      count: 0,
+      error: 0,
+      warning: 0,
+      info: 0,
+      neutral: 0,
+      rows: [],
+    };
+    const severityTone = row.severityTone ?? getSeverityTone(row);
+
+    group.count += 1;
+    group[severityTone] += 1;
+    group.rows.push(stripIndexes(row, fieldIds));
+    groupsByService.set(groupId, group);
+  }
+
+  const groups = Array.from(groupsByService.values()).sort(
+    compareServiceGroups,
+  );
+
+  return {
+    view: "grouped",
+    groups,
+    histogram: createGroupedLogsHistogramResponse(filteredRows, groups),
+    total,
+    filtered: filteredRows.length,
+  };
+}
+
+function createGroupedLogsHistogramResponse(
+  filteredRows: IndexedLogRow[],
+  groups: readonly GroupedLogServiceRow[],
+): GroupedLogsViewResponse["histogram"] {
+  const timedRows = filteredRows
+    .map((row) => ({
+      row,
+      milliseconds: unixNanoToMilliseconds(row.timeUnixNano),
+    }))
+    .filter(
+      (
+        item,
+      ): item is {
+        row: IndexedLogRow;
+        milliseconds: number;
+      } =>
+        item.milliseconds !== undefined &&
+        Number.isFinite(item.milliseconds) &&
+        !Number.isNaN(new Date(item.milliseconds).getTime()),
+    );
+  const services = groups.map((group) => ({
+    id: group.id,
+    service: group.service,
+    color: group.color,
+  }));
+
+  if (timedRows.length === 0) {
+    return {
+      buckets: [],
+      services,
+      total: filteredRows.length,
+    };
+  }
+
+  let fromMs = timedRows[0]?.milliseconds ?? 0;
+  let toMs = fromMs;
+
+  for (const { milliseconds } of timedRows) {
+    fromMs = Math.min(fromMs, milliseconds);
+    toMs = Math.max(toMs, milliseconds);
+  }
+
+  const intervalMs = chooseBucketInterval(toMs - fromMs);
+  const bucketStartMs = floorToInterval(fromMs, intervalMs);
+  const bucketEndMs = floorToInterval(toMs, intervalMs);
+  const bucketCount = Math.floor((bucketEndMs - bucketStartMs) / intervalMs) + 1;
+  const buckets: GroupedLogsHistogramBucket[] = Array.from(
+    { length: bucketCount },
+    (_, index) =>
+      createGroupedHistogramBucket(bucketStartMs + index * intervalMs, intervalMs),
+  );
+
+  for (const { row, milliseconds } of timedRows) {
+    const bucketIndex = Math.floor((milliseconds - bucketStartMs) / intervalMs);
+    const bucket = buckets[bucketIndex];
+
+    if (!bucket) {
+      continue;
+    }
+
+    const serviceId = createServiceGroupId(row.service);
+
+    bucket.services[serviceId] = (bucket.services[serviceId] ?? 0) + 1;
+    bucket.total += 1;
+  }
+
+  return {
+    buckets,
+    services,
+    total: filteredRows.length,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    intervalMs,
+  };
+}
+
+function createGroupedHistogramBucket(
+  bucketStartMs: number,
+  intervalMs: number,
+): GroupedLogsHistogramBucket {
+  return {
+    start: new Date(bucketStartMs).toISOString(),
+    label: formatBucketLabel(bucketStartMs, intervalMs),
+    total: 0,
+    services: {},
+  };
+}
+
+function getLogsViewMode(searchParams: URLSearchParams): LogsViewMode {
+  return searchParams.get(LOGS_VIEW_QUERY_PARAM) === "grouped"
+    ? "grouped"
+    : "logs";
+}
+
+function createServiceGroupId(service: string): string {
+  return `service:${normalizeForIndex(service)}`;
+}
+
+function compareServiceGroups(
+  left: GroupedLogServiceRow,
+  right: GroupedLogServiceRow,
+): number {
+  if (left.count !== right.count) {
+    return right.count - left.count;
+  }
+
+  return left.service.localeCompare(right.service);
 }
 
 function createFilteredRows(

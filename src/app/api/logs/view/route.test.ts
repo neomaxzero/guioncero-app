@@ -134,7 +134,7 @@ describe("GET /api/logs/view", () => {
 
     await GET(
       createRequest(
-        "http://localhost/api/logs/view?service=my.service&field=message",
+        "http://localhost/api/logs/view?service=my.service&view=grouped&field=message&groupedField=count",
       ),
     );
 

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { LOG_FIELD_QUERY_PARAM, type OtlpLogsResponse } from "@/models";
+import {
+  GROUPED_LOG_FIELD_QUERY_PARAM,
+  LOG_FIELD_QUERY_PARAM,
+  LOGS_VIEW_QUERY_PARAM,
+  type OtlpLogsResponse,
+} from "@/models";
 
 export type LogsErrorResponse = {
   error: string;
@@ -75,7 +80,11 @@ function createUpstreamUrl(
     const upstreamUrl = new URL(rawUrl);
 
     searchParams.forEach((value, key) => {
-      if (key === LOG_FIELD_QUERY_PARAM) {
+      if (
+        key === LOG_FIELD_QUERY_PARAM ||
+        key === GROUPED_LOG_FIELD_QUERY_PARAM ||
+        key === LOGS_VIEW_QUERY_PARAM
+      ) {
         return;
       }
 

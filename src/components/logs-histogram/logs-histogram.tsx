@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 
 import {
@@ -15,7 +16,12 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { LogsHistogramBucket, LogsHistogramResponse } from "@/models";
+import type {
+  GroupedLogsHistogramResponse,
+  LogsHistogramBucket,
+  LogsHistogramResponse,
+  LogsViewMode,
+} from "@/models";
 
 const chartConfig = {
   error: {
@@ -41,11 +47,12 @@ const skeletonBars = Array.from({ length: 28 }, (_, index) => index);
 
 type LogsHistogramProps = {
   activeBucketStart: string | null;
-  data: LogsHistogramResponse | undefined;
+  data: GroupedLogsHistogramResponse | LogsHistogramResponse | undefined;
   error: Error | null;
   isError: boolean;
   isFetching: boolean;
   isLoading: boolean;
+  logsViewMode: LogsViewMode;
   onActiveBucketChange: (bucketStart: string | null) => void;
   refetch: () => unknown;
 };
@@ -57,11 +64,17 @@ export function LogsHistogram({
   isError,
   isFetching,
   isLoading,
+  logsViewMode,
   onActiveBucketChange,
   refetch,
 }: LogsHistogramProps) {
-  const hasBuckets = (data?.buckets.length ?? 0) > 0;
-  const buckets = data?.buckets ?? [];
+  const groupedHistogram =
+    logsViewMode === "grouped" && data && "services" in data ? data : undefined;
+  const logsHistogram =
+    logsViewMode === "logs" && data && !("services" in data) ? data : undefined;
+  const hasBuckets = (logsHistogram?.buckets.length ?? 0) > 0;
+  const hasGroupedBuckets = (groupedHistogram?.buckets.length ?? 0) > 0;
+  const buckets = logsHistogram?.buckets ?? [];
 
   return (
     <section className="px-3 pt-2 sm:px-4 sm:pt-3">
@@ -91,11 +104,18 @@ export function LogsHistogram({
           />
         ) : null}
 
-        {!isLoading && !isError && !hasBuckets ? (
+        {!isLoading && !isError && logsViewMode === "logs" && !hasBuckets ? (
           <LogsHistogramFeedback message="No timed logs found" />
         ) : null}
 
-        {!isLoading && !isError && hasBuckets ? (
+        {!isLoading &&
+        !isError &&
+        logsViewMode === "grouped" &&
+        !hasGroupedBuckets ? (
+          <LogsHistogramFeedback message="No timed services found" />
+        ) : null}
+
+        {!isLoading && !isError && logsViewMode === "logs" && hasBuckets ? (
           <>
             <ChartContainer
               config={chartConfig}
@@ -150,6 +170,13 @@ export function LogsHistogram({
             <LogsHistogramLegend />
           </>
         ) : null}
+        {!isLoading &&
+        !isError &&
+        logsViewMode === "grouped" &&
+        hasGroupedBuckets &&
+        groupedHistogram ? (
+          <GroupedServicesHistogram data={groupedHistogram} />
+        ) : null}
       </div>
     </section>
   );
@@ -168,6 +195,91 @@ function getBucketOpacity(
   }
 
   return bucket.start === activeBucketStart ? 1 : 0.28;
+}
+
+function GroupedServicesHistogram({
+  data,
+}: {
+  data: GroupedLogsHistogramResponse;
+}) {
+  const chartConfig = useMemo(
+    () =>
+      Object.fromEntries(
+        data.services.map((service) => [
+          service.id,
+          {
+            label: service.service,
+            color: service.color,
+          },
+        ]),
+      ) satisfies ChartConfig,
+    [data.services],
+  );
+
+  return (
+    <>
+      <ChartContainer config={chartConfig} className="h-28 w-full aspect-auto">
+        <BarChart
+          accessibilityLayer
+          data={data.buckets}
+          margin={{
+            top: 2,
+            right: 4,
+            bottom: 0,
+            left: 0,
+          }}
+          barCategoryGap="18%"
+        >
+          <CartesianGrid vertical={false} strokeDasharray="2 4" />
+          <XAxis
+            dataKey="label"
+            axisLine={false}
+            tickLine={false}
+            minTickGap={28}
+            tickMargin={6}
+          />
+          <YAxis hide width={0} />
+          {data.services.map((service) => (
+            <Bar
+              key={service.id}
+              dataKey={(bucket: GroupedLogsHistogramResponse["buckets"][number]) =>
+                bucket.services[service.id] ?? 0
+              }
+              stackId="services"
+              fill={service.color}
+            />
+          ))}
+        </BarChart>
+      </ChartContainer>
+      <GroupedServicesLegend services={data.services} />
+    </>
+  );
+}
+
+function GroupedServicesLegend({
+  services,
+}: {
+  services: GroupedLogsHistogramResponse["services"];
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+      {services.map((service) => (
+        <span
+          key={service.id}
+          className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+        >
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 shrink-0 rounded-[2px]"
+            style={{ backgroundColor: service.color }}
+          />
+          <span className="max-w-32 truncate" title={service.service}>
+            {service.service}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function LogsHistogramSkeleton() {

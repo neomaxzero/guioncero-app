@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LogRecord, OtlpLogsResponse } from "@/models";
 
 import {
+  createGroupedLogsViewResponse,
   createLogsHistogramResponse,
   createLogsResponse,
   createLogsViewResponse,
@@ -598,6 +599,191 @@ describe("createLogsResponse", () => {
   });
 });
 
+describe("createGroupedLogsViewResponse", () => {
+  it("aggregates filtered logs by service with severity counts", () => {
+    const logs: OtlpLogsResponse = {
+      resourceLogs: [
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "checkout-api" } },
+            ],
+            droppedAttributesCount: 0,
+          },
+          scopeLogs: [
+            {
+              logRecords: [
+                createLogRecord("checkout-error", { severityText: "Error" }),
+                createLogRecord("checkout-info", {
+                  severityText: "Information",
+                }),
+              ],
+            },
+          ],
+        },
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "worker" } },
+            ],
+            droppedAttributesCount: 0,
+          },
+          scopeLogs: [
+            {
+              logRecords: [
+                createLogRecord("worker-warning", { severityText: "Warning" }),
+                createLogRecord("worker-debug", { severityText: "Debug" }),
+                createLogRecord("worker-error", { severityText: "Error" }),
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = createGroupedLogsViewResponse(logs, createSearchParams());
+
+    expect(response).toMatchObject({
+      view: "grouped",
+      total: 5,
+      filtered: 5,
+      groups: [
+        {
+          service: "worker",
+          count: 3,
+          error: 1,
+          warning: 1,
+          info: 0,
+          neutral: 1,
+        },
+        {
+          service: "checkout-api",
+          count: 2,
+          error: 1,
+          warning: 0,
+          info: 1,
+          neutral: 0,
+        },
+      ],
+      histogram: {
+        total: 5,
+        services: [
+          { service: "worker" },
+          { service: "checkout-api" },
+        ],
+        buckets: [{ total: 5 }],
+      },
+    });
+    expect(response.histogram.buckets[0]?.services).toEqual({
+      "service:checkout-api": 2,
+      "service:worker": 3,
+    });
+  });
+
+  it("applies filters before grouping and keeps the grouped histogram time based", () => {
+    const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const logs: OtlpLogsResponse = {
+      resourceLogs: [
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "checkout-api" } },
+            ],
+            droppedAttributesCount: 0,
+          },
+          scopeLogs: [
+            {
+              logRecords: [
+                createLogRecord("keep-a", {
+                  severityText: "Error",
+                  timeUnixNano: unixMsToNanoString(startMs + 1_000),
+                }),
+                createLogRecord("keep-b", {
+                  severityText: "Error",
+                  timeUnixNano: unixMsToNanoString(startMs + 61_000),
+                }),
+                createLogRecord("drop", {
+                  severityText: "Information",
+                  timeUnixNano: unixMsToNanoString(startMs + 62_000),
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = createGroupedLogsViewResponse(
+      logs,
+      createSearchParams("severity=error"),
+    );
+
+    expect(response).toMatchObject({
+      total: 3,
+      filtered: 2,
+      groups: [
+        {
+          service: "checkout-api",
+          count: 2,
+          error: 2,
+        },
+      ],
+      histogram: {
+        total: 2,
+        intervalMs: 60_000,
+        services: [{ service: "checkout-api" }],
+        buckets: [
+          {
+            start: "2026-01-01T12:00:00.000Z",
+            total: 1,
+            services: {
+              "service:checkout-api": 1,
+            },
+          },
+          {
+            start: "2026-01-01T12:01:00.000Z",
+            total: 1,
+            services: {
+              "service:checkout-api": 1,
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("projects child rows using selected detailed log fields", () => {
+    const response = createGroupedLogsViewResponse(
+      createLogsResponseFixture([
+        createLogRecord("ok", {
+          severityText: "Error",
+          traceId: "5B8EFFF798038103D269B633813FC60C",
+        }),
+      ]),
+      createSearchParams("field=message&field=traceId"),
+    );
+
+    expect(response.groups[0]?.rows[0]).toMatchObject({
+      id: expect.any(String),
+      message: "ok",
+      traceId: "5B8EFFF798038103D269B633813FC60C",
+      severityTone: "error",
+    });
+    expect(response.groups[0]?.rows[0]).not.toHaveProperty("severity");
+    expect(response.groups[0]?.rows[0]).not.toHaveProperty("service");
+  });
+
+  it("uses deterministic service colors", () => {
+    const logs = createLogsResponseFixture([createLogRecord("first")]);
+
+    const firstResponse = createGroupedLogsViewResponse(logs, createSearchParams());
+    const secondResponse = createGroupedLogsViewResponse(logs, createSearchParams());
+
+    expect(firstResponse.groups[0]?.color).toBe(secondResponse.groups[0]?.color);
+    expect(firstResponse.groups[0]?.color).toMatch(/^oklch\(0\.78 0\.095 \d+\)$/);
+  });
+});
+
 describe("createLogsHistogramResponse", () => {
   it("returns an empty histogram for empty logs", () => {
     expect(createLogsHistogramResponse({}, createSearchParams())).toEqual({
@@ -733,6 +919,10 @@ describe("createLogsViewResponse", () => {
       createSearchParams("field=message"),
     );
 
+    expect(response.view).toBe("logs");
+    if (response.view !== "logs") {
+      throw new Error("Expected detailed logs view response.");
+    }
     expect(response).toMatchObject({
       total: 2,
       filtered: 2,
