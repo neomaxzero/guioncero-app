@@ -6,9 +6,9 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { useMemo } from "react";
 
 import { useLogs } from "@/data/use-logs";
+import type { LogRow } from "@/models";
 
 import {
   Table,
@@ -18,9 +18,8 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { createLogTableRows, type LogTableRow } from "./log-rows";
 
-const columns: ColumnDef<LogTableRow>[] = [
+const columns: ColumnDef<LogRow>[] = [
   {
     accessorKey: "time",
     header: "Time",
@@ -45,11 +44,10 @@ const skeletonCellWidths = ["w-32", "w-16", "w-28", "w-full"];
 
 export function LogsTable() {
   const { data, error, isError, isFetching, isLoading, refetch } = useLogs();
-  const rows = useMemo(() => createLogTableRows(data), [data]);
   // TanStack Table exposes dynamic functions, so this opts out of compiler memoization.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: rows,
+    data: data?.rows ?? [],
     columns,
     getCoreRowModel: getCoreRowModel(),
   });

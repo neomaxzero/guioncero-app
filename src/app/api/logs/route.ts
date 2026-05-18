@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-import type { LogsResponse } from "@/models";
+import type { LogsResponse, OtlpLogsResponse } from "@/models";
+
+import { createLogsResponse } from "./logs-bff";
 
 type LogsErrorResponse = {
   error: string;
@@ -76,9 +78,11 @@ export async function GET(
       );
     }
 
-    const logs = (await upstreamResponse.json()) as LogsResponse;
+    const logs = (await upstreamResponse.json()) as OtlpLogsResponse;
 
-    return NextResponse.json(logs);
+    return NextResponse.json(
+      createLogsResponse(logs, request.nextUrl.searchParams),
+    );
   } catch {
     return createErrorResponse(
       {

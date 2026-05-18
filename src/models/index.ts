@@ -1,1 +1,8 @@
-export type { LogRecord, LogsResponse, ResourceLogs } from "./logs";
+export type {
+  LogRecord,
+  LogRow,
+  LogsResponse,
+  OtlpLogsResponse,
+  ResourceLogs,
+  ScopeLogs,
+} from "./logs";
